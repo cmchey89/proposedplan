@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SG Map Viewer — Satellite + Land Lot</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html, body { margin: 0; height: 100%; font-family: -apple-system, Segoe UI, Arial, sans-serif; }
+  #map { height: 100%; width: 100%; }
+  #panel {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    z-index: 1000; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    padding: 8px 12px; display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  #panel label { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; white-space: nowrap; }
+  #panel .divider { width: 1px; height: 20px; background: #ddd; }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <label><input type="checkbox" id="toggleLandLot" checked /> Land lot lines</label>
+</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const SINGAPORE_CENTER = [1.3521, 103.8198];
+  const LANDLOT_URL = 'https://www.onemap.gov.sg/maps/tiles/LandLot/{z}/{x}/{y}.png';
+  const ATTRIBUTION = "&copy; <a href='https://www.onemap.gov.sg'>OneMap</a>, Singapore Land Authority";
+
+  // Two-pass approach:
+  // Pass 1 — find compact, text-shaped ink blobs (labels) via connected-
+  // component analysis and repaint them with the local green fill color,
+  // erasing the black text while leaving long line strokes untouched.
+  // Pass 2 — now that labels are "healed" back to green, drop ALL green
+  // fill (original + healed patches) to transparent in one uniform pass,
+  // leaving only the surviving line ink visible over the satellite layer.
+  function processTile(ctx, size) {
+    const imgData = ctx.getImageData(0, 0, size, size);
+    const data = imgData.data;
+
+    const isInk = (i) => {
+      const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2], a = data[i * 4 + 3];
+      const val = (r + g + b) / 3;
+      const sat = Math.max(r, g, b) - Math.min(r, g, b);
+      return a > 10 && val < 175 && sat < 25;
+    };
+
+    // dominant background color, for repainting over healed labels
+    const hist = new Map();
+    for (let i = 0; i < size * size; i++) {
+      if (isInk(i)) continue;
+      const key = data[i * 4] + ',' + data[i * 4 + 1] + ',' + data[i * 4 + 2];
+      hist.set(key, (hist.get(key) || 0) + 1);
+    }
+    let bgColor = [207, 250, 222];
+    let bgBest = 0;
+    for (const [key, count] of hist) {
+      if (count > bgBest) { bgBest = count; bgColor = key.split(',').map(Number); }
+    }
+
+    const visited = new Uint8Array(size * size);
+    const stack = new Int32Array(size * size);
+    const MAX_TEXT_HEIGHT = 18;
+    const MAX_TEXT_WIDTH = 170;
+    const MIN_FILL_RATIO = 0.20;
+
+    for (let start = 0; start < size * size; start++) {
+      if (!isInk(start) || visited[start]) continue;
+
+      let sp = 0;
+      stack[sp++] = start;
+      visited[start] = 1;
+      let minX = size, maxX = 0, minY = size, maxY = 0, count = 0;
+      const members = [];
+
+      while (sp > 0) {
+        const idx = stack[--sp];
+        const x = idx % size, y = (idx / size) | 0;
+        members.push(idx);
+        count++;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+            const nIdx = ny * size + nx;
+            if (isInk(nIdx) && !visited[nIdx]) {
+              visited[nIdx] = 1;
+              stack[sp++] = nIdx;
+            }
+          }
+        }
+      }
+
+      const w = maxX - minX + 1, h = maxY - minY + 1;
+      const fillRatio = count / (w * h);
+      const looksLikeText = h <= MAX_TEXT_HEIGHT && w <= MAX_TEXT_WIDTH && fillRatio >= MIN_FILL_RATIO;
+
+      if (looksLikeText) {
+        for (const idx of members) {
+          data[idx * 4] = bgColor[0];
+          data[idx * 4 + 1] = bgColor[1];
+          data[idx * 4 + 2] = bgColor[2];
+        }
+      }
+    }
+
+    // Pass 2: drop all remaining fill (original + healed-over labels)
+    for (let i = 0; i < size * size; i++) {
+      if (!isInk(i)) data[i * 4 + 3] = 0;
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+  }
+
+  const LinesOnlyLandLot = L.GridLayer.extend({
+    createTile: function (coords, done) {
+      const size = this.getTileSize().x;
+      const canvas = L.DomUtil.create('canvas', 'leaflet-tile');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, size, size);
+        try {
+          processTile(ctx, size);
+          done(null, canvas);
+        } catch (err) {
+          done(err, canvas);
+        }
+      };
+      img.onerror = () => done(new Error('tile load error'), canvas);
+      const z = coords.z, x = coords.x, y = coords.y;
+      img.src = LANDLOT_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+
+      return canvas;
+    }
+  });
+
+  const map = L.map('map', { zoomControl: true }).setView(SINGAPORE_CENTER, 13);
+
+  L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles &copy; Esri', maxZoom: 19, maxNativeZoom: 19 }
+  ).addTo(map);
+
+  const landLot = new LinesOnlyLandLot({ attribution: ATTRIBUTION, maxZoom: 19 });
+  landLot.addTo(map);
+
+  document.getElementById('toggleLandLot').addEventListener('change', (e) => {
+    if (e.target.checked) landLot.addTo(map);
+    else map.removeLayer(landLot);
+  });
+</script>
+
+</body>
+</html>
