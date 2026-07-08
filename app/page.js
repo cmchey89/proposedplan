@@ -161,7 +161,11 @@ export default function Page() {
 
     // zoomControl off here + added manually at bottomleft, since the
     // default topleft position collides with the search box.
-    const map = L.map('map', { zoomControl: false }).setView(SINGAPORE_CENTER, 13);
+    // renderer: L.canvas() forces polylines/circleMarkers to draw onto a
+    // canvas instead of Leaflet's default SVG — html2canvas (used by
+    // Export PDF) doesn't reliably capture nested SVG with transforms,
+    // so lines were silently missing from the exported PDF without this.
+    const map = L.map('map', { zoomControl: false, renderer: L.canvas() }).setView(SINGAPORE_CENTER, 13);
     L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
     L.tileLayer(
