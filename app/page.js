@@ -3,6 +3,23 @@
 import { useEffect, useRef } from 'react';
 import 'leaflet/dist/leaflet.css';
 
+async function handleExportPdf() {
+  const html2canvas = (await import('html2canvas')).default;
+  const { jsPDF } = await import('jspdf');
+
+  const mapEl = document.getElementById('map');
+  const canvas = await html2canvas(mapEl, { useCORS: true, allowTaint: false });
+  const imgData = canvas.toDataURL('image/png');
+
+  const pdf = new jsPDF({
+    orientation: canvas.width >= canvas.height ? 'landscape' : 'portrait',
+    unit: 'px',
+    format: [canvas.width, canvas.height],
+  });
+  pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+  pdf.save('sg-map-export.pdf');
+}
+
 export default function Page() {
   const didInit = useRef(false);
 
@@ -238,7 +255,7 @@ export default function Page() {
     const manholeLayer = L.layerGroup().addTo(map);
     const lineLayer = L.layerGroup().addTo(map);
 
-    let activeTool = null; // null | 'manholeBlue' | 'manholeGreen' | 'blue' | 'green'
+    let activeTool = null; // null | 'manholeBlue' | 'manholeGreen' | 'blue' | 'green' | 'delete'
     let currentPoints = [];
     let previewLine = null;
     let vertexMarkers = [];
@@ -248,6 +265,7 @@ export default function Page() {
       manholeGreen: document.getElementById('toolManholeGreen'),
       blue: document.getElementById('toolBlue'),
       green: document.getElementById('toolGreen'),
+      delete: document.getElementById('toolDelete'),
     };
 
     function setActiveTool(tool) {
@@ -260,6 +278,18 @@ export default function Page() {
       const drawingLine = activeTool === 'blue' || activeTool === 'green';
       if (drawingLine) map.doubleClickZoom.disable();
       else map.doubleClickZoom.enable();
+      map.getContainer().style.cursor = activeTool === 'delete' ? 'crosshair' : '';
+    }
+
+    // Wires up delete-mode click handling on a placed manhole/line: when
+    // the delete tool is active, clicking the feature removes it from its
+    // layer group instead of letting the click fall through to the map.
+    function makeDeletable(layer, group) {
+      layer.on('click', (ev) => {
+        if (activeTool !== 'delete') return;
+        L.DomEvent.stopPropagation(ev);
+        group.removeLayer(layer);
+      });
     }
 
     function resetCurrentLine() {
@@ -276,7 +306,8 @@ export default function Page() {
 
     function finishLine() {
       if ((activeTool === 'blue' || activeTool === 'green') && currentPoints.length >= 2) {
-        L.polyline(currentPoints, { color: LINE_COLORS[activeTool], weight: 4 }).addTo(lineLayer);
+        const line = L.polyline(currentPoints, { color: LINE_COLORS[activeTool], weight: 4 }).addTo(lineLayer);
+        makeDeletable(line, lineLayer);
       }
       resetCurrentLine();
     }
@@ -304,7 +335,8 @@ export default function Page() {
 
     map.on('click', (e) => {
       if (activeTool === 'manholeBlue' || activeTool === 'manholeGreen') {
-        L.marker(e.latlng, { icon: manholeIcons[activeTool] }).addTo(manholeLayer);
+        const marker = L.marker(e.latlng, { icon: manholeIcons[activeTool] }).addTo(manholeLayer);
+        makeDeletable(marker, manholeLayer);
       } else if (activeTool === 'blue' || activeTool === 'green') {
         // Delay the point add so a following dblclick (to finish the line)
         // can cancel it instead of adding a spurious final vertex.
@@ -358,8 +390,14 @@ export default function Page() {
           New infra
         </button>
         <div className="toolbar-divider"></div>
+        <button id="toolDelete" data-tool="delete">
+          <span className="swatch" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d11' }}>✕</span>
+          Delete
+        </button>
+        <div className="toolbar-divider"></div>
         <button id="finishLine">Finish line</button>
         <button id="clearAll">Clear all</button>
+        <button id="exportPdf" onClick={handleExportPdf}>Export PDF</button>
       </div>
       <div id="map"></div>
     </>
