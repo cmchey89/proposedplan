@@ -159,7 +159,10 @@ export default function Page() {
       }
     });
 
-    const map = L.map('map', { zoomControl: true }).setView(SINGAPORE_CENTER, 13);
+    // zoomControl off here + added manually at bottomleft, since the
+    // default topleft position collides with the search box.
+    const map = L.map('map', { zoomControl: false }).setView(SINGAPORE_CENTER, 13);
+    L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
     L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
