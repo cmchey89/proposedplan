@@ -15,12 +15,70 @@
   }
   #panel label { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; white-space: nowrap; }
   #panel .divider { width: 1px; height: 20px; background: #ddd; }
+
+  #searchBox {
+    position: absolute; top: 12px; left: 12px; z-index: 1000; width: 280px;
+  }
+  #searchInput {
+    width: 100%; box-sizing: border-box; padding: 8px 12px; font-size: 14px;
+    border: none; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  #searchResults {
+    margin-top: 4px; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    max-height: 260px; overflow-y: auto; display: none;
+  }
+  #searchResults div {
+    padding: 8px 12px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee;
+  }
+  #searchResults div:last-child { border-bottom: none; }
+  #searchResults div:hover { background: #f0f4ff; }
+
+  #drawToolbar {
+    position: absolute; top: 12px; right: 12px; z-index: 1000; background: #fff;
+    border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); padding: 8px;
+    display: flex; flex-direction: column; gap: 6px; font-size: 13px; width: 160px;
+  }
+  #drawToolbar button {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 13px;
+    border: 1px solid #ddd; border-radius: 6px; background: #fafafa; cursor: pointer; text-align: left;
+  }
+  #drawToolbar button.active { background: #e8f0ff; border-color: #6699ff; }
+  #drawToolbar button:hover { background: #f0f4ff; }
+  #drawToolbar .swatch { width: 14px; height: 14px; flex-shrink: 0; }
+  #drawToolbar .toolbar-divider { height: 1px; background: #ddd; margin: 2px 0; }
+  .manhole-icon svg { display: block; }
 </style>
 </head>
 <body>
 
+<div id="searchBox">
+  <input id="searchInput" type="text" placeholder="Search address or postal code..." autocomplete="off" />
+  <div id="searchResults"></div>
+</div>
 <div id="panel">
   <label><input type="checkbox" id="toggleLandLot" checked /> Land lot lines</label>
+</div>
+<div id="drawToolbar">
+  <button id="toolManholeBlue" data-tool="manholeBlue">
+    <svg class="swatch" viewBox="0 0 20 20"><rect x="2" y="2" width="16" height="16" rx="3" fill="none" stroke="#1e6fff" stroke-width="2"/><line x1="3" y1="17" x2="17" y2="3" stroke="#1e6fff" stroke-width="2"/></svg>
+    Existing manhole
+  </button>
+  <button id="toolManholeGreen" data-tool="manholeGreen">
+    <svg class="swatch" viewBox="0 0 20 20"><rect x="2" y="2" width="16" height="16" rx="3" fill="none" stroke="#22a94c" stroke-width="2"/><line x1="3" y1="17" x2="17" y2="3" stroke="#22a94c" stroke-width="2"/></svg>
+    New manhole
+  </button>
+  <div class="toolbar-divider"></div>
+  <button id="toolBlue" data-tool="blue">
+    <span class="swatch" style="background:#1e6fff;"></span>
+    Existing infra
+  </button>
+  <button id="toolGreen" data-tool="green">
+    <span class="swatch" style="background:#22a94c;"></span>
+    New infra
+  </button>
+  <div class="toolbar-divider"></div>
+  <button id="finishLine">Finish line</button>
+  <button id="clearAll">Clear all</button>
 </div>
 <div id="map"></div>
 
@@ -161,6 +219,168 @@
   document.getElementById('toggleLandLot').addEventListener('change', (e) => {
     if (e.target.checked) landLot.addTo(map);
     else map.removeLayer(landLot);
+  });
+
+  // Search: OneMap's address/postal search endpoint (public, no key needed
+  // — it shows a nag about an auth token in the response but still
+  // returns real results, and CORS is open).
+  const searchInput = document.getElementById('searchInput');
+  const searchResults = document.getElementById('searchResults');
+  let debounceTimer = null;
+
+  function clearResults() {
+    searchResults.style.display = 'none';
+    searchResults.innerHTML = '';
+  }
+
+  async function runSearch(query) {
+    const url = 'https://www.onemap.gov.sg/api/common/elastic/search?searchVal='
+      + encodeURIComponent(query) + '&returnGeom=Y&getAddrDetails=Y&pageNum=1';
+    const res = await fetch(url);
+    const json = await res.json();
+    return json.results || [];
+  }
+
+  function showResults(results) {
+    if (!results.length) {
+      searchResults.innerHTML = '<div>No results found</div>';
+      searchResults.style.display = 'block';
+      return;
+    }
+    searchResults.innerHTML = '';
+    for (const r of results) {
+      const row = document.createElement('div');
+      row.textContent = r.ADDRESS;
+      row.addEventListener('click', () => {
+        const lat = parseFloat(r.LATITUDE), lng = parseFloat(r.LONGITUDE);
+        map.setView([lat, lng], 19);
+        searchInput.value = r.ADDRESS;
+        clearResults();
+      });
+      searchResults.appendChild(row);
+    }
+    searchResults.style.display = 'block';
+  }
+
+  searchInput.addEventListener('input', (e) => {
+    const query = e.target.value.trim();
+    clearTimeout(debounceTimer);
+    if (query.length < 2) { clearResults(); return; }
+    debounceTimer = setTimeout(async () => {
+      try {
+        const results = await runSearch(query);
+        showResults(results.slice(0, 8));
+      } catch (err) {
+        searchResults.innerHTML = '<div>Search failed</div>';
+        searchResults.style.display = 'block';
+      }
+    }, 300);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!document.getElementById('searchBox').contains(e.target)) clearResults();
+  });
+
+  // Drawing tools: manhole markers (existing/new) + existing/new infra lines.
+  const LINE_COLORS = { blue: '#1e6fff', green: '#22a94c' };
+  const MANHOLE_COLORS = { manholeBlue: '#1e6fff', manholeGreen: '#22a94c' };
+
+  function makeManholeIcon(color) {
+    return L.divIcon({
+      className: 'manhole-icon',
+      html: '<svg width="20" height="20" viewBox="0 0 20 20"><rect x="2" y="2" width="16" height="16" rx="3" fill="rgba(255,255,255,0.6)" stroke="' + color + '" stroke-width="2"/><line x1="3" y1="17" x2="17" y2="3" stroke="' + color + '" stroke-width="2"/></svg>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10],
+    });
+  }
+  const manholeIcons = {
+    manholeBlue: makeManholeIcon(MANHOLE_COLORS.manholeBlue),
+    manholeGreen: makeManholeIcon(MANHOLE_COLORS.manholeGreen),
+  };
+
+  const manholeLayer = L.layerGroup().addTo(map);
+  const lineLayer = L.layerGroup().addTo(map);
+
+  let activeTool = null; // null | 'manholeBlue' | 'manholeGreen' | 'blue' | 'green'
+  let currentPoints = [];
+  let previewLine = null;
+  let vertexMarkers = [];
+
+  const toolButtons = {
+    manholeBlue: document.getElementById('toolManholeBlue'),
+    manholeGreen: document.getElementById('toolManholeGreen'),
+    blue: document.getElementById('toolBlue'),
+    green: document.getElementById('toolGreen'),
+  };
+
+  function setActiveTool(tool) {
+    // switching tools abandons any in-progress line
+    resetCurrentLine();
+    activeTool = (activeTool === tool) ? null : tool;
+    for (const key in toolButtons) {
+      toolButtons[key].classList.toggle('active', key === activeTool);
+    }
+    const drawingLine = activeTool === 'blue' || activeTool === 'green';
+    if (drawingLine) map.doubleClickZoom.disable();
+    else map.doubleClickZoom.enable();
+  }
+
+  function resetCurrentLine() {
+    currentPoints = [];
+    if (previewLine) { map.removeLayer(previewLine); previewLine = null; }
+    for (const m of vertexMarkers) map.removeLayer(m);
+    vertexMarkers = [];
+  }
+
+  function updatePreviewLine(color) {
+    if (previewLine) map.removeLayer(previewLine);
+    previewLine = L.polyline(currentPoints, { color, weight: 4, dashArray: '6,6' }).addTo(map);
+  }
+
+  function finishLine() {
+    if ((activeTool === 'blue' || activeTool === 'green') && currentPoints.length >= 2) {
+      L.polyline(currentPoints, { color: LINE_COLORS[activeTool], weight: 4 }).addTo(lineLayer);
+    }
+    resetCurrentLine();
+  }
+
+  for (const key in toolButtons) {
+    toolButtons[key].addEventListener('click', () => setActiveTool(key));
+  }
+
+  document.getElementById('finishLine').addEventListener('click', finishLine);
+
+  document.getElementById('clearAll').addEventListener('click', () => {
+    manholeLayer.clearLayers();
+    lineLayer.clearLayers();
+    resetCurrentLine();
+  });
+
+  let clickTimer = null;
+
+  function addLinePoint(latlng) {
+    currentPoints.push(latlng);
+    const dot = L.circleMarker(latlng, { radius: 4, color: LINE_COLORS[activeTool], fillOpacity: 1 }).addTo(map);
+    vertexMarkers.push(dot);
+    if (currentPoints.length >= 2) updatePreviewLine(LINE_COLORS[activeTool]);
+  }
+
+  map.on('click', (e) => {
+    if (activeTool === 'manholeBlue' || activeTool === 'manholeGreen') {
+      L.marker(e.latlng, { icon: manholeIcons[activeTool] }).addTo(manholeLayer);
+    } else if (activeTool === 'blue' || activeTool === 'green') {
+      // Delay the point add so a following dblclick (to finish the line)
+      // can cancel it instead of adding a spurious final vertex.
+      clearTimeout(clickTimer);
+      clickTimer = setTimeout(() => addLinePoint(e.latlng), 250);
+    }
+  });
+
+  map.on('dblclick', () => {
+    if (activeTool === 'blue' || activeTool === 'green') {
+      clearTimeout(clickTimer);
+      finishLine();
+    }
   });
 </script>
 
