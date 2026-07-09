@@ -21,7 +21,20 @@ async function handleExportPdf() {
   const { jsPDF } = await import('jspdf');
 
   const mapEl = document.getElementById('map');
-  const canvas = await html2canvas(mapEl, { useCORS: true, allowTaint: false });
+
+  // Attribution stays visible on-screen (Esri/OneMap's free tiles require
+  // it), but shouldn't clutter the exported PDF — hide it just for the
+  // capture, then restore immediately after.
+  const attributionEl = mapEl.querySelector('.leaflet-control-attribution');
+  const prevDisplay = attributionEl ? attributionEl.style.display : null;
+  if (attributionEl) attributionEl.style.display = 'none';
+
+  let canvas;
+  try {
+    canvas = await html2canvas(mapEl, { useCORS: true, allowTaint: false });
+  } finally {
+    if (attributionEl) attributionEl.style.display = prevDisplay || '';
+  }
   const imgData = canvas.toDataURL('image/png');
 
   // Standard A4 landscape page — map image is scaled to fit its column
