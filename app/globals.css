@@ -49,4 +49,3 @@ html, body { margin: 0; height: 100%; font-family: -apple-system, Segoe UI, Aria
 #legend .legend-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; white-space: nowrap; }
 #legend .legend-swatch { flex-shrink: 0; }
 #legend .legend-line { width: 16px; height: 3px; border-radius: 2px; }
-#legend .legend-box { width: 12px; height: 12px; border: 2px solid; border-radius: 2px; background: rgba(255,255,255,0.6); }

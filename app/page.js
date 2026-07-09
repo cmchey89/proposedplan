@@ -37,20 +37,32 @@ async function handleExportPdf() {
   }
   const imgData = canvas.toDataURL('image/png');
 
-  // Standard A4 landscape page — map image is scaled to fit its column
-  // (preserving aspect ratio) rather than sizing the page to the
-  // screenshot, so the exported PDF always prints/fits normally. The
-  // legend is drawn as real vector shapes/text in the side column
-  // (not part of the screenshot), so it stays crisp at any zoom.
+  // Standard A4 landscape page, two columns of EQUAL height (map box +
+  // legend box share the same y/height, like DigClear's mapY/mapH vs.
+  // by/bh banner) rather than the legend floating independently of
+  // wherever the aspect-fit image happens to end up.
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
   const margin = 10;
   const legendColWidth = 50;
+  const gap = 8;
 
-  const mapAreaWidth = pageWidth - margin * 3 - legendColWidth;
+  const mapX = margin, mapY = margin;
+  const mapAreaWidth = pageWidth - margin * 2 - gap - legendColWidth;
   const mapAreaHeight = pageHeight - margin * 2;
 
+  const legendX = mapX + mapAreaWidth + gap;
+  const legendY = mapY;
+  const legendHeight = mapAreaHeight;
+
+  // map box border
+  pdf.setDrawColor(180, 180, 180);
+  pdf.setLineWidth(0.4);
+  pdf.rect(mapX, mapY, mapAreaWidth, mapAreaHeight, 'S');
+
+  // fit the screenshot within the map box, preserving aspect ratio,
+  // centered (letterboxed) so the box itself still matches legend height
   const imgRatio = canvas.width / canvas.height;
   let drawWidth = mapAreaWidth;
   let drawHeight = drawWidth / imgRatio;
@@ -58,33 +70,39 @@ async function handleExportPdf() {
     drawHeight = mapAreaHeight;
     drawWidth = drawHeight * imgRatio;
   }
-  const imgX = margin + (mapAreaWidth - drawWidth) / 2;
-  const imgY = margin + (mapAreaHeight - drawHeight) / 2;
-
+  const imgX = mapX + (mapAreaWidth - drawWidth) / 2;
+  const imgY = mapY + (mapAreaHeight - drawHeight) / 2;
   pdf.addImage(imgData, 'PNG', imgX, imgY, drawWidth, drawHeight);
 
-  const legendX = pageWidth - margin - legendColWidth;
-  let legendY = margin + 5;
+  // legend box, same y/height as the map box
+  pdf.setDrawColor(180, 180, 180);
+  pdf.setLineWidth(0.4);
+  pdf.rect(legendX, legendY, legendColWidth, legendHeight, 'S');
+
+  let cy = legendY + 10;
   pdf.setFontSize(12);
   pdf.setTextColor(0, 0, 0);
-  pdf.text('Legend', legendX, legendY);
-  legendY += 8;
+  pdf.text('Legend', legendX + 6, cy);
+  cy += 10;
 
   pdf.setFontSize(10);
   for (const item of LEGEND_ITEMS) {
     const [r, g, b] = hexToRgb(item.color);
+    const swatchX = legendX + 6;
     if (item.type === 'line') {
       pdf.setDrawColor(r, g, b);
       pdf.setLineWidth(1.2);
-      pdf.line(legendX, legendY - 1.5, legendX + 10, legendY - 1.5);
+      pdf.line(swatchX, cy - 1.5, swatchX + 10, cy - 1.5);
     } else {
+      // manhole: rounded box + diagonal line, matching the on-map icon
       pdf.setDrawColor(r, g, b);
-      pdf.setLineWidth(0.8);
-      pdf.rect(legendX, legendY - 4, 6, 6);
+      pdf.setLineWidth(0.7);
+      pdf.roundedRect(swatchX, cy - 5, 6, 6, 1, 1, 'S');
+      pdf.line(swatchX + 0.6, cy - 0.4, swatchX + 5.4, cy - 4.6);
     }
     pdf.setTextColor(0, 0, 0);
-    pdf.text(item.label, legendX + 14, legendY);
-    legendY += 8;
+    pdf.text(item.label, swatchX + 14, cy);
+    cy += 8;
   }
 
   pdf.save('sg-map-export.pdf');
@@ -482,7 +500,12 @@ export default function Page() {
           <div className="legend-row" key={item.label}>
             {item.type === 'line'
               ? <span className="legend-swatch legend-line" style={{ background: item.color }} />
-              : <span className="legend-swatch legend-box" style={{ borderColor: item.color }} />}
+              : (
+                <svg className="legend-swatch" width="14" height="14" viewBox="0 0 20 20">
+                  <rect x="2" y="2" width="16" height="16" rx="3" fill="none" stroke={item.color} strokeWidth="2" />
+                  <line x1="3" y1="17" x2="17" y2="3" stroke={item.color} strokeWidth="2" />
+                </svg>
+              )}
             {item.label}
           </div>
         ))}
