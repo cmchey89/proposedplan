@@ -3,6 +3,19 @@
 import { useEffect, useRef } from 'react';
 import 'leaflet/dist/leaflet.css';
 
+const LEGEND_ITEMS = [
+  { type: 'line', color: '#1e6fff', label: 'Existing infra' },
+  { type: 'line', color: '#22a94c', label: 'New infra' },
+  { type: 'box', color: '#1e6fff', label: 'Existing manhole' },
+  { type: 'box', color: '#22a94c', label: 'New manhole' },
+  { type: 'line', color: '#666666', label: 'Land lot line' },
+];
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
 async function handleExportPdf() {
   const html2canvas = (await import('html2canvas')).default;
   const { jsPDF } = await import('jspdf');
@@ -11,12 +24,56 @@ async function handleExportPdf() {
   const canvas = await html2canvas(mapEl, { useCORS: true, allowTaint: false });
   const imgData = canvas.toDataURL('image/png');
 
-  const pdf = new jsPDF({
-    orientation: canvas.width >= canvas.height ? 'landscape' : 'portrait',
-    unit: 'px',
-    format: [canvas.width, canvas.height],
-  });
-  pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+  // Standard A4 landscape page — map image is scaled to fit its column
+  // (preserving aspect ratio) rather than sizing the page to the
+  // screenshot, so the exported PDF always prints/fits normally. The
+  // legend is drawn as real vector shapes/text in the side column
+  // (not part of the screenshot), so it stays crisp at any zoom.
+  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 10;
+  const legendColWidth = 50;
+
+  const mapAreaWidth = pageWidth - margin * 3 - legendColWidth;
+  const mapAreaHeight = pageHeight - margin * 2;
+
+  const imgRatio = canvas.width / canvas.height;
+  let drawWidth = mapAreaWidth;
+  let drawHeight = drawWidth / imgRatio;
+  if (drawHeight > mapAreaHeight) {
+    drawHeight = mapAreaHeight;
+    drawWidth = drawHeight * imgRatio;
+  }
+  const imgX = margin + (mapAreaWidth - drawWidth) / 2;
+  const imgY = margin + (mapAreaHeight - drawHeight) / 2;
+
+  pdf.addImage(imgData, 'PNG', imgX, imgY, drawWidth, drawHeight);
+
+  const legendX = pageWidth - margin - legendColWidth;
+  let legendY = margin + 5;
+  pdf.setFontSize(12);
+  pdf.setTextColor(0, 0, 0);
+  pdf.text('Legend', legendX, legendY);
+  legendY += 8;
+
+  pdf.setFontSize(10);
+  for (const item of LEGEND_ITEMS) {
+    const [r, g, b] = hexToRgb(item.color);
+    if (item.type === 'line') {
+      pdf.setDrawColor(r, g, b);
+      pdf.setLineWidth(1.2);
+      pdf.line(legendX, legendY - 1.5, legendX + 10, legendY - 1.5);
+    } else {
+      pdf.setDrawColor(r, g, b);
+      pdf.setLineWidth(0.8);
+      pdf.rect(legendX, legendY - 4, 6, 6);
+    }
+    pdf.setTextColor(0, 0, 0);
+    pdf.text(item.label, legendX + 14, legendY);
+    legendY += 8;
+  }
+
   pdf.save('sg-map-export.pdf');
 }
 
@@ -405,6 +462,17 @@ export default function Page() {
         <button id="finishLine">Finish line</button>
         <button id="clearAll">Clear all</button>
         <button id="exportPdf" onClick={handleExportPdf}>Export PDF</button>
+      </div>
+      <div id="legend">
+        <div className="legend-title">Legend</div>
+        {LEGEND_ITEMS.map((item) => (
+          <div className="legend-row" key={item.label}>
+            {item.type === 'line'
+              ? <span className="legend-swatch legend-line" style={{ background: item.color }} />
+              : <span className="legend-swatch legend-box" style={{ borderColor: item.color }} />}
+            {item.label}
+          </div>
+        ))}
       </div>
       <div id="map"></div>
     </>
