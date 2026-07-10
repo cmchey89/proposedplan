@@ -45,8 +45,8 @@ async function handleExportPdf() {
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
   const margin = 10;
-  const legendColWidth = 50;
-  const gap = 8;
+  const legendColWidth = 38;
+  const gap = 6;
 
   const mapX = margin, mapY = margin;
   const mapAreaWidth = pageWidth - margin * 2 - gap - legendColWidth;
@@ -79,30 +79,30 @@ async function handleExportPdf() {
   pdf.setLineWidth(0.4);
   pdf.rect(legendX, legendY, legendColWidth, legendHeight, 'S');
 
-  let cy = legendY + 10;
-  pdf.setFontSize(12);
+  let cy = legendY + 9;
+  pdf.setFontSize(11);
   pdf.setTextColor(0, 0, 0);
-  pdf.text('Legend', legendX + 6, cy);
-  cy += 10;
+  pdf.text('Legend', legendX + 4, cy);
+  cy += 9;
 
-  pdf.setFontSize(10);
+  pdf.setFontSize(8);
   for (const item of LEGEND_ITEMS) {
     const [r, g, b] = hexToRgb(item.color);
-    const swatchX = legendX + 6;
+    const swatchX = legendX + 4;
     if (item.type === 'line') {
       pdf.setDrawColor(r, g, b);
-      pdf.setLineWidth(1.2);
-      pdf.line(swatchX, cy - 1.5, swatchX + 10, cy - 1.5);
+      pdf.setLineWidth(1.1);
+      pdf.line(swatchX, cy - 1.3, swatchX + 7, cy - 1.3);
     } else {
       // manhole: rounded box + diagonal line, matching the on-map icon
       pdf.setDrawColor(r, g, b);
-      pdf.setLineWidth(0.7);
-      pdf.roundedRect(swatchX, cy - 5, 6, 6, 1, 1, 'S');
-      pdf.line(swatchX + 0.6, cy - 0.4, swatchX + 5.4, cy - 4.6);
+      pdf.setLineWidth(0.6);
+      pdf.roundedRect(swatchX, cy - 4, 5, 5, 1, 1, 'S');
+      pdf.line(swatchX + 0.5, cy - 0.3, swatchX + 4.5, cy - 3.7);
     }
     pdf.setTextColor(0, 0, 0);
-    pdf.text(item.label, swatchX + 14, cy);
-    cy += 8;
+    pdf.text(item.label, legendX + 11, cy);
+    cy += 7;
   }
 
   pdf.save('sg-map-export.pdf');
