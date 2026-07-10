@@ -16,6 +16,21 @@ function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+// doc.save() can silently get blocked by the browser after long async
+// work (the html2canvas capture breaks the "direct user gesture" chain
+// some browsers require for auto-downloads) — same issue DigClear hit,
+// same fix: build the blob ourselves and click a real link element.
+function downloadBlob(doc, filename) {
+  const blob = doc.output('blob');
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+}
+
 async function handleExportPdf() {
   const html2canvas = (await import('html2canvas')).default;
   const { jsPDF } = await import('jspdf');
@@ -79,13 +94,13 @@ async function handleExportPdf() {
   pdf.setLineWidth(0.4);
   pdf.rect(legendX, legendY, legendColWidth, legendHeight, 'S');
 
-  let cy = legendY + 9;
-  pdf.setFontSize(11);
+  let cy = legendY + 8;
+  pdf.setFontSize(10);
   pdf.setTextColor(0, 0, 0);
   pdf.text('Legend', legendX + 4, cy);
-  cy += 9;
+  cy += 8;
 
-  pdf.setFontSize(8);
+  pdf.setFontSize(7);
   for (const item of LEGEND_ITEMS) {
     const [r, g, b] = hexToRgb(item.color);
     const swatchX = legendX + 4;
@@ -102,10 +117,10 @@ async function handleExportPdf() {
     }
     pdf.setTextColor(0, 0, 0);
     pdf.text(item.label, legendX + 11, cy);
-    cy += 7;
+    cy += 6;
   }
 
-  pdf.save('sg-map-export.pdf');
+  downloadBlob(pdf, 'sg-map-export.pdf');
 }
 
 export default function Page() {
